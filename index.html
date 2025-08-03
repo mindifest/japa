@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Japa</title>
+    <style type="text/css">
+        /* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap'); */
+    </style>
+    <link rel="stylesheet" href="./css/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="./js/app.js"></script>
+</head>
+<body>
+    <h1>Japa</h1>
+    <div class="filters">
+        <div>
+            <label for="yearSelect">Year:</label>
+            <select id="yearSelect">
+                <option value="all">All Years</option>
+            </select>
+        </div>
+        <div>
+            <label for="monthSelect">Month:</label>
+            <select id="monthSelect" disabled>
+                <option value="all">All Months</option>
+                <option value="1">January</option>
+                <option value="2">February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+            </select>
+        </div>
+        <div>
+            <label for="rangeSelect">Quick Range:</label>
+            <select id="rangeSelect">
+                <option value="">--</option>
+                <option value="3">Last 3 Months</option>
+                <option value="6">Last 6 Months</option>
+                <option value="12">Last 12 Months</option>
+            </select>
+        </div>
+    </div>
+    <div class="tabs">
+        <button class="tab-button active" data-target="roundsTab">Rounds & Value</button>
+        <button class="tab-button" data-target="chantingTimesTab">Chanting Times</button>
+    </div>
+    <div class="tab-content active" id="roundsTab">
+        <canvas id="combinedChart" height="100"></canvas>
+    </div>
+    <div class="tab-content" id="chantingTimesTab">
+        <canvas id="hourlyChart" height="100"></canvas>
+    </div>
+    <script>
+        // Check if Chart.js loaded
+        if (!window.Chart) {
+            console.error('Chart.js failed to load. Please check the CDN or network.');
+            alert('Failed to load Chart.js. Charts will not display.');
+        }
+    </script>
+</body>
+</html>

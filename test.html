@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DuckDB Test</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            margin-top: 1em;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background: #f0f0f0;
+        }
+        .input-group {
+            margin-top: 1em;
+            margin-bottom: 1em;
+        }
+        .input-group label {
+            font-weight: bold;
+            margin-right: 0.5em;
+        }
+        .input-group input {
+            padding: 0.3em;
+        }
+        .input-group button {
+            padding: 0.3em 1em;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .input-group button:hover {
+            background: #1e4fc7;
+        }
+    </style>
+</head>
+<body>
+    <h1>DuckDB Test</h1>
+    <div id="output">Loading...</div>
+    <div class="input-group">
+        <label for="dateInput">View records for date (YYYY-MM-DD):</label>
+        <input type="text" id="dateInput" placeholder="e.g., 2023-05-31">
+        <button id="fetchRecords">Fetch Records</button>
+    </div>
+    <div id="recordsOutput"></div>
+
+    <script type="module">
+        import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm";
+
+        const offsetHours = new Date().getTimezoneOffset() / -60;
+        console.log(`Timezone offset: ${offsetHours} hours`);
+
+        function normalizeRow(row) {
+            const normalized = {};
+            for (const key in row) {
+                const value = row[key];
+                normalized[key] = typeof value === 'bigint' ? Number(value) : value;
+            }
+            return normalized;
+        }
+
+        // Initialize DuckDB
+        async function initDuckDB() {
+            const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+            const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+            const worker = await duckdb.createWorker(bundle.mainWorker);
+            const logger = new duckdb.ConsoleLogger();
+            const db = new duckdb.AsyncDuckDB(logger, worker);
+            await db.instantiate(bundle.mainModule);
+            return db;
+        }
+
+        async function loadCSV(path) {
+            const response = await fetch(path);
+            if (!response.ok) throw new Error(`Failed to load ${path}`);
+            return await response.text();
+        }
+
+        async function loadData() {
+            let conn;
+            try {
+                const db = await initDuckDB();
+                conn = await db.connect();
+
+                // Load CSV
+                const csvText = await loadCSV('./data/test/data.csv');
+
+                // Register CSV as a table
+                await db.registerFileText('data.csv', csvText);
+                await conn.query(`
+                    CREATE TABLE data AS 
+                    SELECT 
+                        time AS time_str,
+                        strikes,
+                        length,
+                        value
+                    FROM read_csv_auto('data.csv')
+                `);
+
+                // Debug: Fetch raw timestamps
+                const rawData = await conn.query(`
+                    SELECT time_str
+                    FROM data
+                    ORDER BY time_str
+                `);
+                console.log('Raw timestamps:', rawData.toArray());
+
+                // Query data: extract date parts as strings
+                const rowsData = await conn.query(`
+                    SELECT 
+                        SUBSTRING(time_str, 1, 10) AS day,
+                        CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
+                        CAST(SUBSTRING(time_str, 6, 2) AS INTEGER) AS month,
+                        COUNT(*) AS rounds
+                    FROM data
+                    GROUP BY day, year, month
+                    ORDER BY day
+                `);
+
+                const rows = rowsData.toArray().map(normalizeRow);
+                console.log('Rounds data:', rows);
+
+                const table = document.createElement('table');
+                const headers = rowsData.schema.fields.map(f => f.name);
+                const thead = table.createTHead();
+                const headerRow = thead.insertRow();
+                headers.forEach(h => {
+                    const th = document.createElement('th');
+                    th.textContent = h;
+                    headerRow.appendChild(th);
+                });
+
+                const tbody = table.createTBody();
+                rows.forEach(row => {
+                    const tr = tbody.insertRow();
+                    headers.forEach(h => {
+                        const td = tr.insertCell();
+                        td.textContent = row[h];
+                    });
+                });
+
+                output.innerHTML = '';
+                output.appendChild(table);
+
+                // Fetch records for a specific date
+                const dateInput = document.getElementById('dateInput');
+                const fetchRecordsButton = document.getElementById('fetchRecords');
+                const recordsOutput = document.getElementById('recordsOutput');
+
+                fetchRecordsButton.addEventListener('click', async () => {
+                    const selectedDate = dateInput.value.trim();
+                    if (!selectedDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                        recordsOutput.textContent = 'Please enter a valid date (YYYY-MM-DD)';
+                        return;
+                    }
+
+                    try {
+                        const recordsData = await conn.query(`
+                            SELECT time_str, strikes, length, value
+                            FROM data
+                            WHERE SUBSTRING(time_str, 1, 10) = ?
+                        `, [selectedDate]);
+
+                        const records = recordsData.toArray().map(normalizeRow);
+                        console.log(`Records for ${selectedDate}:`, records);
+
+                        if (records.length === 0) {
+                            recordsOutput.textContent = `No records found for ${selectedDate}`;
+                            return;
+                        }
+
+                        const recordsTable = document.createElement('table');
+                        const recordsHeaders = ['time_str', 'strikes', 'length', 'value'];
+                        const rThead = recordsTable.createTHead();
+                        const rHeaderRow = rThead.insertRow();
+                        recordsHeaders.forEach(h => {
+                            const th = document.createElement('th');
+                            th.textContent = h;
+                            rHeaderRow.appendChild(th);
+                        });
+
+                        const rTbody = recordsTable.createTBody();
+                        records.forEach(row => {
+                            const tr = rTbody.insertRow();
+                            recordsHeaders.forEach(h => {
+                                const td = tr.insertCell();
+                                td.textContent = row[h];
+                            });
+                        });
+
+                        recordsOutput.innerHTML = `<h3>Records for ${selectedDate}</h3>`;
+                        recordsOutput.appendChild(recordsTable);
+                    } catch (error) {
+                        console.error(`Error fetching records for ${selectedDate}:`, error);
+                        recordsOutput.textContent = `Error fetching records: ${error.message}`;
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('output').textContent = 'Error loading data';
+            } finally {
+                if (conn) await conn.close();
+            }
+        }
+        loadData();
+    </script>
+</body>
+</html>
