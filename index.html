@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Japa</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="./js/main.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 1rem;
+        }
+
+        .filters {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .tab-button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-bottom: 2px solid transparent;
+            background: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .tab-button.active {
+            border-color: #2563eb;
+            color: #2563eb;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        canvas {
+            /* width: 100% !important; */
+            /* height: 300px !important; */
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Japa</h1>
+    <div class="filters">
+        <div>
+            <label for="yearSelect">Year:</label>
+            <select id="yearSelect">
+                <option value="all">All Years</option>
+            </select>
+        </div>
+        <div>
+            <label for="monthSelect">Month:</label>
+            <select id="monthSelect">
+                <option value="all">All Months</option>
+                <option value="1">January</option>
+                <option value="2">February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+            </select>
+        </div>
+        <div>
+            <label for="rangeSelect">Quick Range:</label>
+            <select id="rangeSelect">
+                <option value="">--</option>
+                <option value="3">Last 3 Months</option>
+                <option value="6">Last 6 Months</option>
+                <option value="12">Last 12 Months</option>
+            </select>
+        </div>
+    </div>
+    <div class="tabs">
+        <button class="tab-button active" data-target="roundsTab">Rounds</button>
+        <button class="tab-button" data-target="valueTab">Value</button>
+    </div>
+
+    <div class="tab-content active" id="roundsTab">
+        <canvas id="roundsChart" height="100"></canvas>
+    </div>
+    <div class="tab-content" id="valueTab">
+        <canvas id="valueChart" height="100"></canvas>
+    </div>
+
+
+</body>
+
+</html>
