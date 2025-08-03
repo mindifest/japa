@@ -33,6 +33,7 @@ async function loadData() {
         if (!window.Chart) {
             throw new Error('Chart.js is not loaded. Cannot initialize charts.');
         }
+        console.log('Chart.js version:', window.Chart.version);
 
         const db = await initDuckDB();
         conn = await db.connect();
@@ -60,35 +61,21 @@ async function loadData() {
         `);
         console.log('Raw timestamps:', rawData.toArray());
 
-        // Query data: group by day and count records
-        const roundsData = await conn.query(`
+        // Combined query: group by day for rounds and total_value
+        const dataQuery = await conn.query(`
             SELECT 
                 SUBSTRING(time_str, 1, 10) AS day,
                 CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
                 CAST(SUBSTRING(time_str, 6, 2) AS INTEGER) AS month,
-                CAST(COUNT(*) AS DOUBLE) AS rounds
-            FROM data
-            GROUP BY day, year, month
-            ORDER BY day
-        `);
-
-        const rounds = roundsData.toArray().map(normalizeRow);
-        console.log('Rounds data:', rounds);
-
-        // Query data: group by day and sum value
-        const valueData = await conn.query(`
-            SELECT 
-                SUBSTRING(time_str, 1, 10) AS day,
-                CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
-                CAST(SUBSTRING(time_str, 6, 2) AS INTEGER) AS month,
+                CAST(COUNT(*) AS DOUBLE) AS rounds,
                 CAST(SUM(value) AS DOUBLE) AS total_value
             FROM data
             GROUP BY day, year, month
             ORDER BY day
         `);
 
-        const value = valueData.toArray().map(normalizeRow);
-        console.log('Value data:', value);
+        const data = dataQuery.toArray().map(normalizeRow);
+        console.log('Combined data:', data);
 
         // Initialize charts
         const ctx1 = document.getElementById('roundsChart');
@@ -230,7 +217,7 @@ async function loadData() {
         });
 
         // Populate year filter
-        const years = [...new Set(rounds.map(r => r.year))].sort((a, b) => b - a);
+        const years = [...new Set(data.map(r => r.year))].sort((a, b) => b - a);
         const yearSelect = document.getElementById('yearSelect');
         if (!yearSelect) throw new Error('Year select element not found.');
         years.forEach(year => {
@@ -250,38 +237,31 @@ async function loadData() {
             const selectedMonth = monthSelect.value === 'all' ? null : parseInt(monthSelect.value);
             const range = parseInt(rangeSelect.value) || null;
 
-            let filteredRounds = rounds;
-            let filteredValues = value;
+            let filteredData = data;
 
             if (range) {
-                const latestDate = new Date(Math.max(...rounds.map(r => new Date(r.day))));
+                const latestDate = new Date(Math.max(...data.map(r => new Date(r.day))));
                 const startDate = new Date(latestDate);
                 startDate.setMonth(startDate.getMonth() - range);
-                filteredRounds = rounds.filter(r => new Date(r.day) >= startDate);
-                filteredValues = value.filter(r => new Date(r.day) >= startDate);
+                filteredData = data.filter(r => new Date(r.day) >= startDate);
             } else {
-                filteredRounds = rounds.filter(r =>
-                    (!selectedYear || r.year === selectedYear) &&
-                    (!selectedMonth || r.month === selectedMonth)
-                );
-                filteredValues = value.filter(r =>
+                filteredData = data.filter(r =>
                     (!selectedYear || r.year === selectedYear) &&
                     (!selectedMonth || r.month === selectedMonth)
                 );
             }
 
             // Log filtered data for debugging
-            console.log('Filtered rounds:', filteredRounds);
-            console.log('Filtered values:', filteredValues);
+            console.log('Filtered data:', filteredData);
 
             // Update rounds chart data
-            window.roundsChart.data.labels = filteredRounds.map(r => r.day);
-            window.roundsChart.data.datasets[0].data = filteredRounds.map(r => Number(r.rounds));
+            window.roundsChart.data.labels = filteredData.map(r => r.day);
+            window.roundsChart.data.datasets[0].data = filteredData.map(r => Number(r.rounds));
             window.roundsChart.update();
 
             // Update value chart data
-            window.valueChart.data.labels = filteredValues.map(r => r.day);
-            window.valueChart.data.datasets[0].data = filteredValues.map(r => Number(r.total_value));
+            window.valueChart.data.labels = filteredData.map(r => r.day);
+            window.valueChart.data.datasets[0].data = filteredData.map(r => Number(r.total_value));
             window.valueChart.update();
         }
 

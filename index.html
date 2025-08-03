@@ -58,5 +58,12 @@
     <div class="tab-content" id="valueTab">
         <canvas id="valueChart" height="100"></canvas>
     </div>
+    <script>
+        // Check if Chart.js loaded
+        if (!window.Chart) {
+            console.error('Chart.js failed to load. Please check the CDN or network.');
+            alert('Failed to load Chart.js. Charts will not display.');
+        }
+    </script>
 </body>
 </html>
