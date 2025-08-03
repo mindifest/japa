@@ -50,8 +50,8 @@ const hoverLinePlugin = {
             // Calculate values for both Y-axes
             const yRoundsScale = scales.yRounds;
             const yValueScale = scales.yValue;
-            const roundsValue = yRoundsScale.getValueForPixel(y);
-            const valueValue = yValueScale.getValueForPixel(y);
+            const roundsValue = yRoundsScale ? yRoundsScale.getValueForPixel(y) : undefined;
+            const valueValue = yValueScale ? yValueScale.getValueForPixel(y) : undefined;
 
             // Draw Rounds value label (left Y-axis, above line)
             if (roundsValue !== undefined && !isNaN(roundsValue)) {
@@ -91,6 +91,7 @@ const hoverLinePlugin = {
 
 async function loadData() {
     let conn;
+    let db;
     try {
         // Check if Chart.js is available
         if (!window.Chart) {
@@ -98,7 +99,7 @@ async function loadData() {
         }
         console.log('Chart.js version:', window.Chart.version);
 
-        const db = await initDuckDB();
+        db = await initDuckDB();
         conn = await db.connect();
 
         // Load CSV
@@ -124,8 +125,8 @@ async function loadData() {
         `);
         console.log('Raw timestamps:', rawData.toArray());
 
-        // Combined query: group by day for rounds and total_value
-        const dataQuery = await conn.query(`
+        // Combined query for Rounds & Value chart: group by day
+        const dailyDataQuery = await conn.query(`
             SELECT 
                 SUBSTRING(time_str, 1, 10) AS day,
                 CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
@@ -137,21 +138,21 @@ async function loadData() {
             ORDER BY day
         `);
 
-        const data = dataQuery.toArray().map(normalizeRow);
-        console.log('Combined data:', data);
+        const dailyData = dailyDataQuery.toArray().map(normalizeRow);
+        console.log('Daily data:', dailyData);
 
         // Log max values for debugging
-        const maxRounds = Math.max(...data.map(r => r.rounds));
-        const maxValue = Math.max(...data.map(r => r.total_value));
+        const maxRounds = Math.max(...dailyData.map(r => r.rounds));
+        const maxValue = Math.max(...dailyData.map(r => r.total_value));
         console.log('Max rounds:', maxRounds, 'Max total_value:', maxValue);
 
         // Register custom plugin
         window.Chart.register(hoverLinePlugin);
 
-        // Initialize combined chart
-        const ctx = document.getElementById('combinedChart');
-        if (!ctx) throw new Error('Combined chart canvas not found.');
-        window.combinedChart = new window.Chart(ctx.getContext('2d'), {
+        // Initialize combined chart (Rounds & Value)
+        const ctxCombined = document.getElementById('combinedChart');
+        if (!ctxCombined) throw new Error('Combined chart canvas not found.');
+        window.combinedChart = new window.Chart(ctxCombined.getContext('2d'), {
             type: 'line',
             data: {
                 labels: [],
@@ -244,8 +245,72 @@ async function loadData() {
             }
         });
 
+        // Initialize hourly chart (Chanting Times)
+        const ctxHourly = document.getElementById('hourlyChart');
+        if (!ctxHourly) throw new Error('Hourly chart canvas not found.');
+        window.hourlyChart = new window.Chart(ctxHourly.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: Array.from({ length: 24 }, (_, i) => {
+                    const hour = i % 12 || 12;
+                    const period = i < 12 ? 'am' : 'pm';
+                    return `${hour}${period}`;
+                }),
+                datasets: [{
+                    label: 'Rounds per Hour',
+                    data: Array(24).fill(0),
+                    backgroundColor: '#16a34a',
+                    borderColor: '#15803d',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'category',
+                        title: { display: true, text: 'Hour of Day' }
+                    },
+                    y: {
+                        type: 'linear',
+                        title: { display: true, text: 'Rounds', color: '#16a34a' },
+                        min: 0,
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                return `Hour: ${tooltipItems[0].label}`;
+                            },
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                return `Rounds: ${value.toLocaleString()}`;
+                            }
+                        }
+                    },
+                    legend: {
+                        labels: {
+                            generateLabels(chart) {
+                                const data = chart.data;
+                                return data.datasets.map((dataset, i) => ({
+                                    text: dataset.label, // Static label without total
+                                    fillStyle: dataset.backgroundColor,
+                                    strokeStyle: dataset.borderColor,
+                                    lineWidth: 1,
+                                    hidden: !chart.isDatasetVisible(i),
+                                    index: i
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         // Populate year filter
-        const years = [...new Set(data.map(r => r.year))].sort((a, b) => b - a);
+        const years = [...new Set(dailyData.map(r => r.year))].sort((a, b) => b - a);
         const yearSelect = document.getElementById('yearSelect');
         if (!yearSelect) throw new Error('Year select element not found.');
         years.forEach(year => {
@@ -260,37 +325,78 @@ async function loadData() {
         const rangeSelect = document.getElementById('rangeSelect');
         if (!monthSelect || !rangeSelect) throw new Error('Filter select elements not found.');
 
-        function updateChart() {
+        async function updateCharts() {
             const selectedYear = yearSelect.value === 'all' ? null : parseInt(yearSelect.value);
             const selectedMonth = monthSelect.value === 'all' ? null : parseInt(monthSelect.value);
             const range = parseInt(rangeSelect.value) || null;
 
-            let filteredData = data;
-
+            // Filter daily data for Rounds & Value chart
+            let filteredDailyData = dailyData;
             if (range) {
-                const latestDate = new Date(Math.max(...data.map(r => new Date(r.day))));
+                const latestDate = new Date(Math.max(...dailyData.map(r => new Date(r.day))));
                 const startDate = new Date(latestDate);
                 startDate.setMonth(startDate.getMonth() - range);
-                filteredData = data.filter(r => new Date(r.day) >= startDate);
+                filteredDailyData = dailyData.filter(r => new Date(r.day) >= startDate);
             } else {
-                filteredData = data.filter(r =>
+                filteredDailyData = dailyData.filter(r =>
                     (!selectedYear || r.year === selectedYear) &&
                     (!selectedMonth || r.month === selectedMonth)
                 );
             }
 
-            // Log filtered data for debugging
-            console.log('Filtered data:', filteredData);
+            // Log filtered daily data
+            console.log('Filtered daily data:', filteredDailyData);
 
-            // Update combined chart data
-            window.combinedChart.data.labels = filteredData.map(r => r.day);
-            window.combinedChart.data.datasets[0].data = filteredData.map(r => Number(r.rounds));
-            window.combinedChart.data.datasets[1].data = filteredData.map(r => Number(r.total_value));
+            // Update combined chart
+            window.combinedChart.data.labels = filteredDailyData.map(r => r.day);
+            window.combinedChart.data.datasets[0].data = filteredDailyData.map(r => Number(r.rounds));
+            window.combinedChart.data.datasets[1].data = filteredDailyData.map(r => Number(r.total_value));
             window.combinedChart.update();
+
+            // Query for hourly data with filters
+            let hourlyQuery = `
+                SELECT 
+                    CAST(SUBSTRING(time_str, 12, 2) AS INTEGER) AS hour,
+                    CAST(COUNT(*) AS DOUBLE) AS rounds
+                FROM data
+            `;
+            if (range || selectedYear || selectedMonth) {
+                hourlyQuery += ' WHERE ';
+                const conditions = [];
+                if (range) {
+                    const latestDate = new Date(Math.max(...dailyData.map(r => new Date(r.day))));
+                    const startDate = new Date(latestDate);
+                    startDate.setMonth(startDate.getMonth() - range);
+                    conditions.push(`time_str >= '${startDate.toISOString().slice(0, 10)}'`);
+                }
+                if (selectedYear) conditions.push(`SUBSTRING(time_str, 1, 4) = '${selectedYear}'`);
+                if (selectedMonth) conditions.push(`SUBSTRING(time_str, 6, 2) = '${selectedMonth.toString().padStart(2, '0')}'`);
+                hourlyQuery += conditions.join(' AND ');
+            }
+            hourlyQuery += `
+                GROUP BY hour
+                ORDER BY hour
+            `;
+
+            const hourlyDataResult = await conn.query(hourlyQuery);
+            const hourlyData = hourlyDataResult.toArray().map(normalizeRow);
+            console.log('Hourly data:', hourlyData);
+
+            // Prepare hourly chart data
+            const hourlyRounds = Array(24).fill(0);
+            hourlyData.forEach(row => {
+                if (row.hour >= 0 && row.hour < 24) {
+                    hourlyRounds[row.hour] = row.rounds;
+                }
+            });
+
+            // Update hourly chart
+            window.hourlyChart.data.datasets[0].data = hourlyRounds;
+            window.hourlyChart.update();
         }
 
-        yearSelect.addEventListener('change', updateChart);
-        monthSelect.addEventListener('change', updateChart);
+        yearSelect.addEventListener('change', updateCharts);
+        monthSelect.addEventListener('change', updateCharts);
         rangeSelect.addEventListener('change', () => {
             if (rangeSelect.value) {
                 yearSelect.disabled = true;
@@ -299,7 +405,7 @@ async function loadData() {
                 yearSelect.disabled = false;
                 monthSelect.disabled = false;
             }
-            updateChart();
+            updateCharts();
         });
 
         // Tab switching
@@ -312,19 +418,23 @@ async function loadData() {
                 target.classList.add('active');
                 if (window.combinedChart && button.dataset.target === 'roundsTab') {
                     window.combinedChart.resize();
+                } else if (window.hourlyChart && button.dataset.target === 'chantingTimesTab') {
+                    window.hourlyChart.resize();
                 }
             });
         });
 
         // Initial chart render
-        updateChart();
+        await updateCharts();
 
     } catch (error) {
         console.error('Error loading data or initializing charts:', error);
         alert('Failed to load data or initializing charts. Please check the console for details.');
     } finally {
-        if (conn) await conn.close();
+        // Keep connection open for updateCharts
     }
+
+    return { db, conn };
 }
 
 loadData();
