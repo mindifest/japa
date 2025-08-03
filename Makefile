@@ -11,4 +11,4 @@ merge-test:
 .PHONY: fake
 fake:
 	@reset
-	@node bin/fake.js 500
+	@node bin/fake.js 800
