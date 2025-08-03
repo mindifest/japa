@@ -20,9 +20,14 @@ async function initDuckDB() {
     return db;
 }
 
-async function loadCSV(path) {
-    const response = await fetch(path);
-    if (!response.ok) throw new Error(`Failed to load ${path}`);
+async function loadCSV() {
+    // Use test data only if ?data=test, otherwise use prod
+    const params = new URLSearchParams(window.location.search);
+    const dataSource = params.get('data') === 'test' ? './data/test/data.csv' : './data/data.csv';
+    console.log('Loading data from:', dataSource);
+
+    const response = await fetch(dataSource);
+    if (!response.ok) throw new Error(`Failed to load ${dataSource}`);
     return await response.text();
 }
 
@@ -103,7 +108,7 @@ async function loadData() {
         conn = await db.connect();
 
         // Load CSV
-        const csvText = await loadCSV('./data/test/data.csv');
+        const csvText = await loadCSV();
 
         // Register CSV as a table
         await db.registerFileText('data.csv', csvText);
@@ -320,11 +325,7 @@ async function loadData() {
             yearSelect.appendChild(option);
         });
 
-        // Event listeners for filters
-        const monthSelect = document.getElementById('monthSelect');
-        const rangeSelect = document.getElementById('rangeSelect');
-        if (!monthSelect || !rangeSelect) throw new Error('Filter select elements not found.');
-
+        // Define updateCharts before event listeners
         async function updateCharts() {
             const selectedYear = yearSelect.value === 'all' ? null : parseInt(yearSelect.value);
             const selectedMonth = monthSelect.value === 'all' ? null : parseInt(monthSelect.value);
@@ -395,15 +396,32 @@ async function loadData() {
             window.hourlyChart.update();
         }
 
-        yearSelect.addEventListener('change', updateCharts);
+        // Event listeners for filters
+        const monthSelect = document.getElementById('monthSelect');
+        const rangeSelect = document.getElementById('rangeSelect');
+        if (!monthSelect || !rangeSelect) throw new Error('Filter select elements not found.');
+
+        // Enable/disable monthSelect based on yearSelect
+        yearSelect.addEventListener('change', () => {
+            if (yearSelect.value === 'all') {
+                monthSelect.disabled = true;
+                monthSelect.value = 'all'; // Reset to All Months
+            } else {
+                monthSelect.disabled = false;
+            }
+            updateCharts();
+        });
+
         monthSelect.addEventListener('change', updateCharts);
+
         rangeSelect.addEventListener('change', () => {
             if (rangeSelect.value) {
                 yearSelect.disabled = true;
                 monthSelect.disabled = true;
+                monthSelect.value = 'all'; // Reset to All Months
             } else {
                 yearSelect.disabled = false;
-                monthSelect.disabled = false;
+                monthSelect.disabled = yearSelect.value === 'all'; // Disable month if year is 'all'
             }
             updateCharts();
         });
