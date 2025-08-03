@@ -37,3 +37,10 @@ canvas {
 .tab-content.active {
     display: block;
 }
+/* Style Y-axis labels */
+.chartjs-axis-yRounds .chartjs-axis-title {
+    color: #2563eb;
+}
+.chartjs-axis-yValue .chartjs-axis-title {
+    color: #f11212;
+}

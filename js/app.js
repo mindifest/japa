@@ -26,6 +26,69 @@ async function loadCSV(path) {
     return await response.text();
 }
 
+// Custom Chart.js plugin for horizontal hover line with value labels
+const hoverLinePlugin = {
+    id: 'hoverLine',
+    afterDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chart._hoverY) return; // Only draw if hover Y position is set
+
+        const y = chart._hoverY;
+
+        // Ensure y is within chart area
+        if (y >= chartArea.top && y <= chartArea.bottom) {
+            // Draw horizontal line
+            ctx.save();
+            ctx.beginPath();
+            ctx.strokeStyle = '#666666'; // Gray line
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]); // Dashed line
+            ctx.moveTo(chartArea.left, y);
+            ctx.lineTo(chartArea.right, y);
+            ctx.stroke();
+
+            // Calculate values for both Y-axes
+            const yRoundsScale = scales.yRounds;
+            const yValueScale = scales.yValue;
+            const roundsValue = yRoundsScale.getValueForPixel(y);
+            const valueValue = yValueScale.getValueForPixel(y);
+
+            // Draw Rounds value label (left Y-axis, above line)
+            if (roundsValue !== undefined && !isNaN(roundsValue)) {
+                const formattedRounds = Math.round(roundsValue); // Cast to integer
+                ctx.font = '12px sans-serif';
+                ctx.fillStyle = '#2563eb'; // Match Rounds axis color
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`Rounds: ${formattedRounds}`, chartArea.left + 5, y - 10); // Above line
+            }
+
+            // Draw Value value label (right Y-axis, above line)
+            if (valueValue !== undefined && !isNaN(valueValue)) {
+                const formattedValue = Math.round(valueValue); // Cast to integer
+                ctx.font = '12px sans-serif';
+                ctx.fillStyle = '#f11212'; // Match Value axis color
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`Value: ${formattedValue}`, chartArea.right - 5, y - 10); // Above line
+            }
+
+            ctx.restore();
+        }
+    },
+    afterInit(chart) {
+        chart.canvas.addEventListener('mousemove', (event) => {
+            const rect = chart.canvas.getBoundingClientRect();
+            chart._hoverY = event.clientY - rect.top;
+            chart.update();
+        });
+        chart.canvas.addEventListener('mouseout', () => {
+            chart._hoverY = null;
+            chart.update();
+        });
+    }
+};
+
 async function loadData() {
     let conn;
     try {
@@ -77,89 +140,39 @@ async function loadData() {
         const data = dataQuery.toArray().map(normalizeRow);
         console.log('Combined data:', data);
 
-        // Initialize charts
-        const ctx1 = document.getElementById('roundsChart');
-        if (!ctx1) throw new Error('Rounds chart canvas not found.');
-        window.roundsChart = new window.Chart(ctx1.getContext('2d'), {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Rounds',
-                    data: [],
-                    borderColor: '#2563eb',
-                    backgroundColor: 'rgba(37, 99, 235, 0.2)',
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    x: {
-                        type: 'category',
-                        title: { display: true, text: 'Date' },
-                        ticks: {
-                            callback: function(value, index, ticks) {
-                                const label = this.getLabelForValue(index);
-                                const [year, month, day] = label.split('-').map(Number);
-                                return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                            }
-                        }
-                    },
-                    y: {
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
-                        title: { display: true, text: 'Rounds' },
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            title: function(tooltipItems) {
-                                const label = tooltipItems[0].label;
-                                const [year, month, day] = label.split('-').map(Number);
-                                return new Date(year, month - 1, day).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-                            }
-                        }
-                    },
-                    legend: {
-                        labels: {
-                            generateLabels(chart) {
-                                const data = chart.data;
-                                return data.datasets.map((dataset, i) => {
-                                    const total = dataset.data.reduce((sum, val) => sum + val, 0);
-                                    const formattedTotal = total.toLocaleString();
-                                    return {
-                                        text: `${dataset.label}: ${formattedTotal}`,
-                                        fillStyle: dataset.backgroundColor,
-                                        strokeStyle: dataset.borderColor,
-                                        lineWidth: 2,
-                                        hidden: !chart.isDatasetVisible(i),
-                                        index: i
-                                    };
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        // Log max values for debugging
+        const maxRounds = Math.max(...data.map(r => r.rounds));
+        const maxValue = Math.max(...data.map(r => r.total_value));
+        console.log('Max rounds:', maxRounds, 'Max total_value:', maxValue);
 
-        const ctx2 = document.getElementById('valueChart');
-        if (!ctx2) throw new Error('Value chart canvas not found.');
-        window.valueChart = new window.Chart(ctx2.getContext('2d'), {
+        // Register custom plugin
+        window.Chart.register(hoverLinePlugin);
+
+        // Initialize combined chart
+        const ctx = document.getElementById('combinedChart');
+        if (!ctx) throw new Error('Combined chart canvas not found.');
+        window.combinedChart = new window.Chart(ctx.getContext('2d'), {
             type: 'line',
             data: {
                 labels: [],
-                datasets: [{
-                    label: 'Value',
-                    data: [],
-                    borderColor: '#f11212',
-                    backgroundColor: 'rgba(241, 18, 18, 0.2)',
-                    fill: true
-                }]
+                datasets: [
+                    {
+                        label: 'Rounds',
+                        data: [],
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                        yAxisID: 'yRounds',
+                        fill: true
+                    },
+                    {
+                        label: 'Value',
+                        data: [],
+                        borderColor: '#f11212',
+                        backgroundColor: 'rgba(241, 18, 18, 0.2)',
+                        yAxisID: 'yValue',
+                        fill: true
+                    }
+                ]
             },
             options: {
                 responsive: true,
@@ -175,12 +188,22 @@ async function loadData() {
                             }
                         }
                     },
-                    y: {
+                    yRounds: {
                         type: 'linear',
-                        display: true,
                         position: 'left',
-                        title: { display: true, text: 'Value' },
+                        title: { display: true, text: 'Rounds', color: '#2563eb' },
+                        min: 0,
+                        max: 120,
                         beginAtZero: true
+                    },
+                    yValue: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: 'Value', color: '#f11212' },
+                        min: 0,
+                        max: 1200,
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false }
                     }
                 },
                 plugins: {
@@ -190,6 +213,11 @@ async function loadData() {
                                 const label = tooltipItems[0].label;
                                 const [year, month, day] = label.split('-').map(Number);
                                 return new Date(year, month - 1, day).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                            },
+                            label: function(context) {
+                                const datasetLabel = context.dataset.label;
+                                const value = context.parsed.y;
+                                return `${datasetLabel}: ${value.toLocaleString()}`;
                             }
                         }
                     },
@@ -254,15 +282,11 @@ async function loadData() {
             // Log filtered data for debugging
             console.log('Filtered data:', filteredData);
 
-            // Update rounds chart data
-            window.roundsChart.data.labels = filteredData.map(r => r.day);
-            window.roundsChart.data.datasets[0].data = filteredData.map(r => Number(r.rounds));
-            window.roundsChart.update();
-
-            // Update value chart data
-            window.valueChart.data.labels = filteredData.map(r => r.day);
-            window.valueChart.data.datasets[0].data = filteredData.map(r => Number(r.total_value));
-            window.valueChart.update();
+            // Update combined chart data
+            window.combinedChart.data.labels = filteredData.map(r => r.day);
+            window.combinedChart.data.datasets[0].data = filteredData.map(r => Number(r.rounds));
+            window.combinedChart.data.datasets[1].data = filteredData.map(r => Number(r.total_value));
+            window.combinedChart.update();
         }
 
         yearSelect.addEventListener('change', updateChart);
@@ -286,10 +310,8 @@ async function loadData() {
                 button.classList.add('active');
                 const target = document.getElementById(button.dataset.target);
                 target.classList.add('active');
-                if (window.roundsChart && button.dataset.target === 'roundsTab') {
-                    window.roundsChart.resize();
-                } else if (window.valueChart && button.dataset.target === 'valueTab') {
-                    window.valueChart.resize();
+                if (window.combinedChart && button.dataset.target === 'roundsTab') {
+                    window.combinedChart.resize();
                 }
             });
         });
