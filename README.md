@@ -1,5 +1,7 @@
 # japa
 
+To use test data add `?data=test` in the browser.
+
 ### Make Commands
 
 - `make fake` - make fake data for testing

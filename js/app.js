@@ -52,11 +52,9 @@ const hoverLinePlugin = {
             ctx.lineTo(chartArea.right, y);
             ctx.stroke();
 
-            // Calculate values for both Y-axes
-            const yRoundsScale = scales.yRounds;
-            const yValueScale = scales.yValue;
+            // Calculate Rounds value
+            const yRoundsScale = scales.y;
             const roundsValue = yRoundsScale ? yRoundsScale.getValueForPixel(y) : undefined;
-            const valueValue = yValueScale ? yValueScale.getValueForPixel(y) : undefined;
 
             // Draw Rounds value label (left Y-axis, above line)
             if (roundsValue !== undefined && !isNaN(roundsValue)) {
@@ -66,16 +64,6 @@ const hoverLinePlugin = {
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(`Rounds: ${formattedRounds}`, chartArea.left + 5, y - 10); // Above line
-            }
-
-            // Draw Value value label (right Y-axis, above line)
-            if (valueValue !== undefined && !isNaN(valueValue)) {
-                const formattedValue = Math.round(valueValue); // Cast to integer
-                ctx.font = '12px sans-serif';
-                ctx.fillStyle = '#f11212'; // Match Value axis color
-                ctx.textAlign = 'right';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(`Value: ${formattedValue}`, chartArea.right - 5, y - 10); // Above line
             }
 
             ctx.restore();
@@ -130,8 +118,8 @@ async function loadData() {
         `);
         console.log('Raw timestamps:', rawData.toArray());
 
-        // Combined query for Rounds & Value chart: group by day
-        const dailyDataQuery = await conn.query(`
+        // Initial daily query for year population and default chart
+        let dailyDataQuery = await conn.query(`
             SELECT 
                 SUBSTRING(time_str, 1, 10) AS day,
                 CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
@@ -143,10 +131,8 @@ async function loadData() {
             ORDER BY day
         `);
 
-        const dailyData = dailyDataQuery.toArray().map(normalizeRow);
-        console.log('Daily data:', dailyData);
-
         // Log max values for debugging
+        const dailyData = dailyDataQuery.toArray().map(normalizeRow);
         const maxRounds = Math.max(...dailyData.map(r => r.rounds));
         const maxValue = Math.max(...dailyData.map(r => r.total_value));
         console.log('Max rounds:', maxRounds, 'Max total_value:', maxValue);
@@ -154,7 +140,7 @@ async function loadData() {
         // Register custom plugin
         window.Chart.register(hoverLinePlugin);
 
-        // Initialize combined chart (Rounds & Value)
+        // Initialize combined chart (Rounds only)
         const ctxCombined = document.getElementById('combinedChart');
         if (!ctxCombined) throw new Error('Combined chart canvas not found.');
         window.combinedChart = new window.Chart(ctxCombined.getContext('2d'), {
@@ -165,17 +151,10 @@ async function loadData() {
                     {
                         label: 'Rounds',
                         data: [],
+                        totalValues: [], // Initialize totalValues
                         borderColor: '#2563eb',
                         backgroundColor: 'rgba(37, 99, 235, 0.2)',
-                        yAxisID: 'yRounds',
-                        fill: true
-                    },
-                    {
-                        label: 'Value',
-                        data: [],
-                        borderColor: '#f11212',
-                        backgroundColor: 'rgba(241, 18, 18, 0.2)',
-                        yAxisID: 'yValue',
+                        yAxisID: 'y',
                         fill: true
                     }
                 ]
@@ -189,27 +168,29 @@ async function loadData() {
                         ticks: {
                             callback: function(value, index, ticks) {
                                 const label = this.getLabelForValue(index);
-                                const [year, month, day] = label.split('-').map(Number);
-                                return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                                if (label.includes('W')) {
+                                    // Weekly label: "YYYY-Www" (e.g., "2023-W01")
+                                    const [year, week] = label.split('-W');
+                                    const weekStart = new Date(year, 0, 1 + (parseInt(week) - 1) * 7);
+                                    // Adjust to Monday, then get end of week (Sunday)
+                                    weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7) + 1);
+                                    const weekEnd = new Date(weekStart);
+                                    weekEnd.setDate(weekStart.getDate() + 6);
+                                    return weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                                } else {
+                                    // Daily label: "YYYY-MM-DD"
+                                    const [year, month, day] = label.split('-').map(Number);
+                                    return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                                }
                             }
                         }
                     },
-                    yRounds: {
+                    y: {
                         type: 'linear',
                         position: 'left',
                         title: { display: true, text: 'Rounds', color: '#2563eb' },
                         min: 0,
-                        max: 120,
                         beginAtZero: true
-                    },
-                    yValue: {
-                        type: 'linear',
-                        position: 'right',
-                        title: { display: true, text: 'Value', color: '#f11212' },
-                        min: 0,
-                        max: 1200,
-                        beginAtZero: true,
-                        grid: { drawOnChartArea: false }
                     }
                 },
                 plugins: {
@@ -217,13 +198,27 @@ async function loadData() {
                         callbacks: {
                             title: function(tooltipItems) {
                                 const label = tooltipItems[0].label;
-                                const [year, month, day] = label.split('-').map(Number);
-                                return new Date(year, month - 1, day).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                                if (label.includes('W')) {
+                                    // Weekly tooltip
+                                    const [year, week] = label.split('-W');
+                                    const weekStart = new Date(year, 0, 1 + (parseInt(week) - 1) * 7);
+                                    weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7) + 1);
+                                    return `Week of ${weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+                                } else {
+                                    // Daily tooltip
+                                    const [year, month, day] = label.split('-').map(Number);
+                                    return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                                }
                             },
                             label: function(context) {
-                                const datasetLabel = context.dataset.label;
-                                const value = context.parsed.y;
-                                return `${datasetLabel}: ${value.toLocaleString()}`;
+                                const index = context.dataIndex;
+                                const dataset = context.dataset;
+                                const rounds = dataset.data[index];
+                                const value = dataset.totalValues[index] || 0; // Fallback to 0
+                                return [
+                                    ` Rounds: ${Math.round(rounds).toLocaleString()}`,
+                                    `Value: ${Math.round(value).toLocaleString()}`
+                                ];
                             }
                         }
                     },
@@ -231,18 +226,19 @@ async function loadData() {
                         labels: {
                             generateLabels(chart) {
                                 const data = chart.data;
-                                return data.datasets.map((dataset, i) => {
-                                    const total = dataset.data.reduce((sum, val) => sum + val, 0);
-                                    const formattedTotal = total.toLocaleString();
-                                    return {
-                                        text: `${dataset.label}: ${formattedTotal}`,
-                                        fillStyle: dataset.backgroundColor,
-                                        strokeStyle: dataset.borderColor,
-                                        lineWidth: 2,
-                                        hidden: !chart.isDatasetVisible(i),
-                                        index: i
-                                    };
-                                });
+                                const dataset = data.datasets[0];
+                                const totalRounds = dataset.data.reduce((sum, val) => sum + val, 0) || 0;
+                                const totalValue = dataset.totalValues.reduce((sum, val) => sum + val, 0) || 0;
+                                const formattedRounds = totalRounds.toLocaleString();
+                                const formattedValue = totalValue.toLocaleString();
+                                return [{
+                                    text: `Rounds: ${formattedRounds} (${formattedValue})`,
+                                    fillStyle: dataset.backgroundColor,
+                                    strokeStyle: dataset.borderColor,
+                                    lineWidth: 2,
+                                    hidden: !chart.isDatasetVisible(0),
+                                    index: 0
+                                }];
                             }
                         }
                     }
@@ -300,7 +296,7 @@ async function loadData() {
                             generateLabels(chart) {
                                 const data = chart.data;
                                 return data.datasets.map((dataset, i) => ({
-                                    text: dataset.label, // Static label without total
+                                    text: dataset.label,
                                     fillStyle: dataset.backgroundColor,
                                     strokeStyle: dataset.borderColor,
                                     lineWidth: 1,
@@ -331,27 +327,62 @@ async function loadData() {
             const selectedMonth = monthSelect.value === 'all' ? null : parseInt(monthSelect.value);
             const range = parseInt(rangeSelect.value) || null;
 
-            // Filter daily data for Rounds & Value chart
-            let filteredDailyData = dailyData;
-            if (range) {
-                const latestDate = new Date(Math.max(...dailyData.map(r => new Date(r.day))));
-                const startDate = new Date(latestDate);
-                startDate.setMonth(startDate.getMonth() - range);
-                filteredDailyData = dailyData.filter(r => new Date(r.day) >= startDate);
-            } else {
-                filteredDailyData = dailyData.filter(r =>
-                    (!selectedYear || r.year === selectedYear) &&
-                    (!selectedMonth || r.month === selectedMonth)
-                );
+            // Determine if weekly aggregation is needed
+            const useWeekly = !range && (!selectedYear || !selectedMonth); // All Years or Year with All Months
+
+            // Query for combined chart data
+            let dataQuery = dailyDataQuery;
+            if (useWeekly) {
+                let weeklyQuery = `
+                    SELECT 
+                        STRFTIME(time_str, '%Y-W%W') AS week,
+                        CAST(SUBSTRING(time_str, 1, 4) AS INTEGER) AS year,
+                        CAST(COUNT(*) AS DOUBLE) AS rounds,
+                        CAST(SUM(value) AS DOUBLE) AS total_value
+                    FROM data
+                `;
+                if (selectedYear) {
+                    weeklyQuery += ` WHERE SUBSTRING(time_str, 1, 4) = '${selectedYear}'`;
+                }
+                weeklyQuery += `
+                    GROUP BY week, year
+                    ORDER BY week
+                `;
+                dataQuery = await conn.query(weeklyQuery);
             }
 
-            // Log filtered daily data
-            console.log('Filtered daily data:', filteredDailyData);
+            let filteredDailyData = dataQuery.toArray().map(normalizeRow);
+            console.log('Combined chart data:', filteredDailyData);
+
+            // Apply filters for daily data or use weekly data as is
+            if (!useWeekly) {
+                if (range) {
+                    const latestDate = new Date(Math.max(...filteredDailyData.map(r => new Date(r.day))));
+                    const startDate = new Date(latestDate);
+                    startDate.setMonth(startDate.getMonth() - range);
+                    filteredDailyData = filteredDailyData.filter(r => new Date(r.day) >= startDate);
+                } else {
+                    filteredDailyData = filteredDailyData.filter(r =>
+                        (!selectedYear || r.year === selectedYear) &&
+                        (!selectedMonth || r.month === selectedMonth)
+                    );
+                }
+            }
+
+            // Log filtered data
+            console.log('Filtered combined chart data:', filteredDailyData);
+
+            // Dynamic Y-axis scaling
+            const maxRounds = Math.max(...filteredDailyData.map(r => r.rounds), 1); // Avoid 0 max
+            window.combinedChart.options.scales.y.max = Math.ceil(maxRounds * 1.2);
+            console.log('Dynamic Y-axis limit:', { maxRounds: window.combinedChart.options.scales.y.max });
 
             // Update combined chart
-            window.combinedChart.data.labels = filteredDailyData.map(r => r.day);
+            window.combinedChart.data.labels = useWeekly
+                ? filteredDailyData.map(r => r.week)
+                : filteredDailyData.map(r => r.day);
             window.combinedChart.data.datasets[0].data = filteredDailyData.map(r => Number(r.rounds));
-            window.combinedChart.data.datasets[1].data = filteredDailyData.map(r => Number(r.total_value));
+            window.combinedChart.data.datasets[0].totalValues = filteredDailyData.map(r => Number(r.total_value));
             window.combinedChart.update();
 
             // Query for hourly data with filters
@@ -365,7 +396,8 @@ async function loadData() {
                 hourlyQuery += ' WHERE ';
                 const conditions = [];
                 if (range) {
-                    const latestDate = new Date(Math.max(...dailyData.map(r => new Date(r.day))));
+                    const rawData = dailyDataQuery.toArray();
+                    const latestDate = new Date(Math.max(...rawData.map(r => new Date(r.day))));
                     const startDate = new Date(latestDate);
                     startDate.setMonth(startDate.getMonth() - range);
                     conditions.push(`time_str >= '${startDate.toISOString().slice(0, 10)}'`);

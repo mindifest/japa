@@ -38,9 +38,9 @@ canvas {
     display: block;
 }
 /* Style Y-axis labels */
-.chartjs-axis-yRounds .chartjs-axis-title {
-    color: #2563eb;
+.chartjs-axis-y .chartjs-axis-title {
+    color: #2563eb; /* Match Rounds for combined chart, hourly chart overridden */
 }
-.chartjs-axis-yValue .chartjs-axis-title {
-    color: #f11212;
+#hourlyChart .chartjs-axis-y .chartjs-axis-title {
+    color: #16a34a; /* Match hourly chart */
 }
