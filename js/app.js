@@ -176,7 +176,7 @@ async function loadData() {
                                     weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7) + 1);
                                     const weekEnd = new Date(weekStart);
                                     weekEnd.setDate(weekStart.getDate() + 6);
-                                    return weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                                    return weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                                 } else {
                                     // Daily label: "YYYY-MM-DD"
                                     const [year, month, day] = label.split('-').map(Number);
@@ -216,7 +216,7 @@ async function loadData() {
                                 const rounds = dataset.data[index];
                                 const value = dataset.totalValues[index] || 0; // Fallback to 0
                                 return [
-                                    ` Rounds: ${Math.round(rounds).toLocaleString()}`,
+                                    `Rounds: ${Math.round(rounds).toLocaleString()}`,
                                     `Value: ${Math.round(value).toLocaleString()}`
                                 ];
                             }
@@ -232,7 +232,7 @@ async function loadData() {
                                 const formattedRounds = totalRounds.toLocaleString();
                                 const formattedValue = totalValue.toLocaleString();
                                 return [{
-                                    text: `Rounds: ${formattedRounds} (${formattedValue})`,
+                                    text: `Rounds: ${formattedRounds} (value: ${formattedValue})`,
                                     fillStyle: dataset.backgroundColor,
                                     strokeStyle: dataset.borderColor,
                                     lineWidth: 2,
@@ -320,15 +320,17 @@ async function loadData() {
             option.text = year;
             yearSelect.appendChild(option);
         });
+        // Default to current year (2025)
+        yearSelect.value = '2025';
 
         // Define updateCharts before event listeners
         async function updateCharts() {
-            const selectedYear = yearSelect.value === 'all' ? null : parseInt(yearSelect.value);
+            const selectedYear = parseInt(yearSelect.value);
             const selectedMonth = monthSelect.value === 'all' ? null : parseInt(monthSelect.value);
             const range = parseInt(rangeSelect.value) || null;
 
             // Determine if weekly aggregation is needed
-            const useWeekly = !range && (!selectedYear || !selectedMonth); // All Years or Year with All Months
+            const useWeekly = !range && !selectedMonth; // Year with All Months
 
             // Query for combined chart data
             let dataQuery = dailyDataQuery;
@@ -340,11 +342,7 @@ async function loadData() {
                         CAST(COUNT(*) AS DOUBLE) AS rounds,
                         CAST(SUM(value) AS DOUBLE) AS total_value
                     FROM data
-                `;
-                if (selectedYear) {
-                    weeklyQuery += ` WHERE SUBSTRING(time_str, 1, 4) = '${selectedYear}'`;
-                }
-                weeklyQuery += `
+                    WHERE SUBSTRING(time_str, 1, 4) = '${selectedYear}'
                     GROUP BY week, year
                     ORDER BY week
                 `;
@@ -354,7 +352,7 @@ async function loadData() {
             let filteredDailyData = dataQuery.toArray().map(normalizeRow);
             console.log('Combined chart data:', filteredDailyData);
 
-            // Apply filters for daily data or use weekly data as is
+            // Apply filters for daily data
             if (!useWeekly) {
                 if (range) {
                     const latestDate = new Date(Math.max(...filteredDailyData.map(r => new Date(r.day))));
@@ -363,7 +361,7 @@ async function loadData() {
                     filteredDailyData = filteredDailyData.filter(r => new Date(r.day) >= startDate);
                 } else {
                     filteredDailyData = filteredDailyData.filter(r =>
-                        (!selectedYear || r.year === selectedYear) &&
+                        r.year === selectedYear &&
                         (!selectedMonth || r.month === selectedMonth)
                     );
                 }
@@ -402,7 +400,7 @@ async function loadData() {
                     startDate.setMonth(startDate.getMonth() - range);
                     conditions.push(`time_str >= '${startDate.toISOString().slice(0, 10)}'`);
                 }
-                if (selectedYear) conditions.push(`SUBSTRING(time_str, 1, 4) = '${selectedYear}'`);
+                conditions.push(`SUBSTRING(time_str, 1, 4) = '${selectedYear}'`);
                 if (selectedMonth) conditions.push(`SUBSTRING(time_str, 6, 2) = '${selectedMonth.toString().padStart(2, '0')}'`);
                 hourlyQuery += conditions.join(' AND ');
             }
@@ -435,12 +433,8 @@ async function loadData() {
 
         // Enable/disable monthSelect based on yearSelect
         yearSelect.addEventListener('change', () => {
-            if (yearSelect.value === 'all') {
-                monthSelect.disabled = true;
-                monthSelect.value = 'all'; // Reset to All Months
-            } else {
-                monthSelect.disabled = false;
-            }
+            monthSelect.disabled = false; // Always enabled since no "All Years"
+            monthSelect.value = 'all'; // Reset to All Months
             updateCharts();
         });
 
@@ -453,7 +447,7 @@ async function loadData() {
                 monthSelect.value = 'all'; // Reset to All Months
             } else {
                 yearSelect.disabled = false;
-                monthSelect.disabled = yearSelect.value === 'all'; // Disable month if year is 'all'
+                monthSelect.disabled = false; // Always enabled
             }
             updateCharts();
         });
