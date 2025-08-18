@@ -16,9 +16,11 @@ if ! ls "$RAW_DIR"/*.csv >/dev/null 2>&1; then
     exit 0
 fi
 
-# Append all CSVs (skip header), newline, then delete
+# Append all CSVs (including their headers), newline, then delete
 for file in "$RAW_DIR"/*.csv; do
-    tail -n +2 "$file" >> "$OUTPUT_FILE" && echo "" >> "$OUTPUT_FILE" && rm "$file"
+    cat "$file" >> "$OUTPUT_FILE"
+    echo "" >> "$OUTPUT_FILE"
+    rm "$file"
 done
 
 echo "Merged raw CSVs into data.csv and cleared raw/."
