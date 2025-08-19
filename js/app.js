@@ -105,7 +105,6 @@ async function loadData() {
             SELECT 
                 time AS time_str,
                 strikes,
-                length,
                 value
             FROM read_csv_auto('data.csv')
         `);
