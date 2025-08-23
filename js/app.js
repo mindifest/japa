@@ -104,7 +104,6 @@ async function loadData() {
             CREATE TABLE data AS 
             SELECT 
                 time AS time_str,
-                strikes,
                 value
             FROM read_csv_auto('data.csv')
         `);
