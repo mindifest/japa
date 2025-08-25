@@ -20,15 +20,22 @@ async function initDuckDB() {
     return db;
 }
 
-async function loadCSV() {
+async function loadDataCSV() {
     // Use test data only if ?data=test, otherwise use prod
     const params = new URLSearchParams(window.location.search);
     const dataSource = params.get('data') === 'test' ? './data/test/data.csv' : './data/data.csv';
-    console.log('Loading data from:', dataSource);
+    // console.log('Loading data from:', dataSource);
 
     const response = await fetch(dataSource);
     if (!response.ok) throw new Error(`Failed to load ${dataSource}`);
     return await response.text();
+}
+
+async function loadAnnotationsCSV() {
+    // cache-bust if you want: './data/annotations.csv?v=1'
+    const res = await fetch('./data/annotations.csv', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Failed to load annotations.csv');
+    return await res.text();
 }
 
 // Custom Chart.js plugin for horizontal hover line with value labels
@@ -96,7 +103,7 @@ async function loadData() {
         conn = await db.connect();
 
         // Load CSV
-        const csvText = await loadCSV();
+        const csvText = await loadDataCSV();
 
         // Register CSV as a table
         await db.registerFileText('data.csv', csvText);
@@ -114,7 +121,7 @@ async function loadData() {
             FROM data
             ORDER BY time_str
         `);
-        console.log('Raw timestamps:', rawData.toArray());
+        // console.log('Raw timestamps:', rawData.toArray());
 
         // Initial daily query for year population and default chart
         let dailyDataQuery = await conn.query(`
@@ -131,12 +138,70 @@ async function loadData() {
 
         // Log max values for debugging
         const dailyData = dailyDataQuery.toArray().map(normalizeRow);
-        const maxRounds = Math.max(...dailyData.map(r => r.rounds));
-        const maxValue = Math.max(...dailyData.map(r => r.total_value));
-        console.log('Max rounds:', maxRounds, 'Max total_value:', maxValue);
+        // const maxRounds = Math.max(...dailyData.map(r => r.rounds));
+        // const maxValue = Math.max(...dailyData.map(r => r.total_value));
+        // console.log('Max rounds:', maxRounds, 'Max total_value:', maxValue);
 
         // Register custom plugin
         window.Chart.register(hoverLinePlugin);
+
+        // --- Annotations ---
+        const annText = await loadAnnotationsCSV();
+        await db.registerFileText('annotations.csv', annText);
+        await conn.query(`
+            CREATE TABLE ann AS
+            SELECT 
+                time AS time_str,
+                SUBSTRING(time, 1, 10) AS day,          -- YYYY-MM-DD
+                STRFTIME(time, '%Y-W%W') AS week,       -- YYYY-Www
+                comment
+            FROM read_csv_auto('annotations.csv')
+        `);
+        const annRows = (await conn.query(`SELECT day, week, comment FROM ann`))
+            .toArray()
+            .map(normalizeRow);
+
+        // Build lookups for quick access in the chart
+        const annByDay = annRows.reduce((m, r) => {
+            (m[r.day] ??= []).push(r.comment);
+            return m;
+        }, {});
+
+        const annotationsPlugin = {
+            id: 'simpleAnnotations',
+            afterDatasetsDraw(chart) {
+                const { ctx, chartArea, scales } = chart;
+                const labels = chart.data.labels || [];
+                const map = chart.options.plugins?.simpleAnnotations?.map || null;
+                if (!map) return;
+
+                ctx.save();
+                labels.forEach((label, i) => {
+                    const notes = map[label];
+                    if (!notes || !notes.length) return;
+                    const x = scales.x.getPixelForTick(i);
+                    const y = chartArea.top + 12; // draw near top
+
+                    // marker
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ef4444'; // red dot
+                    ctx.fill();
+
+                    // first note text (short)
+                    const text = (notes[0] || '').slice(0, 18);
+                    if (text) {
+                        ctx.font = '11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillStyle = '#ef4444';
+                        ctx.fillText(text, x, y - 6);
+                    }
+                });
+                ctx.restore();
+            }
+        };
+        window.Chart.register(annotationsPlugin);
 
         // Initialize combined chart (Rounds only)
         const ctxCombined = document.getElementById('combinedChart');
@@ -149,7 +214,7 @@ async function loadData() {
                     {
                         label: 'Rounds',
                         data: [],
-                        totalValues: [], // Initialize totalValues
+                        totalValues: [],
                         borderColor: '#2563eb',
                         backgroundColor: 'rgba(37, 99, 235, 0.2)',
                         yAxisID: 'y',
@@ -164,19 +229,16 @@ async function loadData() {
                         type: 'category',
                         title: { display: true, text: 'Date' },
                         ticks: {
-                            callback: function(value, index, ticks) {
+                            callback: function (value, index, ticks) {
                                 const label = this.getLabelForValue(index);
                                 if (label.includes('W')) {
-                                    // Weekly label: "YYYY-Www" (e.g., "2023-W01")
                                     const [year, week] = label.split('-W');
                                     const weekStart = new Date(year, 0, 1 + (parseInt(week) - 1) * 7);
-                                    // Adjust to Monday, then get end of week (Sunday)
                                     weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7) + 1);
                                     const weekEnd = new Date(weekStart);
                                     weekEnd.setDate(weekStart.getDate() + 6);
                                     return weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                                 } else {
-                                    // Daily label: "YYYY-MM-DD"
                                     const [year, month, day] = label.split('-').map(Number);
                                     return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                                 }
@@ -194,29 +256,34 @@ async function loadData() {
                 plugins: {
                     tooltip: {
                         callbacks: {
-                            title: function(tooltipItems) {
+                            title: function (tooltipItems) {
                                 const label = tooltipItems[0].label;
                                 if (label.includes('W')) {
-                                    // Weekly tooltip
                                     const [year, week] = label.split('-W');
                                     const weekStart = new Date(year, 0, 1 + (parseInt(week) - 1) * 7);
                                     weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7) + 1);
                                     return `Week of ${weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
                                 } else {
-                                    // Daily tooltip
                                     const [year, month, day] = label.split('-').map(Number);
                                     return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
                                 }
                             },
-                            label: function(context) {
+                            label: function (context) {
                                 const index = context.dataIndex;
                                 const dataset = context.dataset;
                                 const rounds = dataset.data[index];
-                                const value = dataset.totalValues[index] || 0; // Fallback to 0
+                                const value = dataset.totalValues[index] || 0;
                                 return [
                                     `Rounds: ${Math.round(rounds).toLocaleString()}`,
                                     `Value: ${Math.round(value).toLocaleString()}`
                                 ];
+                            },
+                            afterBody(items) {
+                                const chart = items[0].chart;
+                                const label = items[0].label;
+                                const map = chart.options.plugins?.simpleAnnotations?.map || {};
+                                const notes = map[label] || [];
+                                return notes.length ? notes.map(n => `Note: ${n}`) : [];
                             }
                         }
                     },
@@ -239,6 +306,9 @@ async function loadData() {
                                 }];
                             }
                         }
+                    },
+                    simpleAnnotations: {
+                        map: annByDay // Assign annotations here
                     }
                 }
             }
@@ -280,10 +350,10 @@ async function loadData() {
                 plugins: {
                     tooltip: {
                         callbacks: {
-                            title: function(tooltipItems) {
+                            title: function (tooltipItems) {
                                 return `Hour: ${tooltipItems[0].label}`;
                             },
-                            label: function(context) {
+                            label: function (context) {
                                 const value = context.parsed.y;
                                 return `Rounds: ${value.toLocaleString()}`;
                             }
@@ -348,7 +418,7 @@ async function loadData() {
             }
 
             let filteredDailyData = dataQuery.toArray().map(normalizeRow);
-            console.log('Combined chart data:', filteredDailyData);
+            // console.log('Combined chart data:', filteredDailyData);
 
             // Apply filters for daily data
             if (!useWeekly) {
@@ -366,12 +436,12 @@ async function loadData() {
             }
 
             // Log filtered data
-            console.log('Filtered combined chart data:', filteredDailyData);
+            // console.log('Filtered combined chart data:', filteredDailyData);
 
             // Dynamic Y-axis scaling
             const maxRounds = Math.max(...filteredDailyData.map(r => r.rounds), 1); // Avoid 0 max
             window.combinedChart.options.scales.y.max = Math.ceil(maxRounds * 1.2);
-            console.log('Dynamic Y-axis limit:', { maxRounds: window.combinedChart.options.scales.y.max });
+            // console.log('Dynamic Y-axis limit:', { maxRounds: window.combinedChart.options.scales.y.max });
 
             // Update combined chart
             window.combinedChart.data.labels = useWeekly
@@ -409,7 +479,7 @@ async function loadData() {
 
             const hourlyDataResult = await conn.query(hourlyQuery);
             const hourlyData = hourlyDataResult.toArray().map(normalizeRow);
-            console.log('Hourly data:', hourlyData);
+            // console.log('Hourly data:', hourlyData);
 
             // Prepare hourly chart data
             const hourlyRounds = Array(24).fill(0);
@@ -421,6 +491,14 @@ async function loadData() {
 
             // Update hourly chart
             window.hourlyChart.data.datasets[0].data = hourlyRounds;
+
+            // Tell the plugin what to draw for current labels
+            window.hourlyChart.options.plugins.simpleAnnotations = {
+                map: window.annByDay
+            };
+
+            // window.combinedChart.update();
+
             window.hourlyChart.update();
         }
 
